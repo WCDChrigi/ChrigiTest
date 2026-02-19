@@ -393,6 +393,48 @@
     }
     footer a { color: var(--accent); text-decoration: none; }
 
+    /* ── Stop popup ── */
+    .popup-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.65);
+      z-index: 300; display: none;
+    }
+    .popup-overlay.open { display: flex; align-items: center; justify-content: center; }
+    .popup-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      max-width: 360px; width: 90%;
+      max-height: 70vh; overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+      animation: slideIn 0.2s ease;
+    }
+    .popup-header {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 16px;
+    }
+    .popup-close {
+      margin-left: auto; cursor: pointer;
+      color: var(--muted); font-size: 18px; line-height: 1;
+    }
+    .popup-close:hover { color: var(--text); }
+    .popup-stops { display: flex; flex-direction: column; }
+    .popup-stop {
+      display: flex; align-items: center; gap: 10px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px; color: var(--text);
+    }
+    .popup-stop:last-child { border-bottom: none; }
+    .popup-stop.origin { color: var(--accent); }
+    .popup-stop .stop-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0;
+    }
+    .popup-stop.origin .stop-dot { background: var(--accent); }
+    .popup-stop .stop-time { color: var(--muted); font-size: 10px; margin-left: auto; }
+
     @media (max-width: 500px) {
       .table-head, .dep-row, .skel-row {
         grid-template-columns: 70px 1fr 55px 70px;
@@ -476,6 +518,17 @@
   <div id="departures"></div>
 
   <footer>Daten: <a href="https://transport.opendata.ch" target="_blank">transport.opendata.ch</a> · Fahrplan © SBB / Alle Transportunternehmen</footer>
+</div>
+
+<div class="popup-overlay" id="popupOverlay" onclick="closePopup(event)">
+  <div class="popup-box" id="popupBox">
+    <div class="popup-header">
+      <div class="badge" id="popupBadge"></div>
+      <span id="popupTitle" style="font-size:13px;color:var(--text)"></span>
+      <span class="popup-close" onclick="closePopup()">✕</span>
+    </div>
+    <div class="popup-stops" id="popupStops"></div>
+  </div>
 </div>
 
 <script>
@@ -925,6 +978,7 @@ function renderDepartures() {
   }
   head.style.display = 'grid';
 
+  window._filteredDeps = filtered;
   document.getElementById('departures').innerHTML = filtered.map((d, i) => {
     const col      = lineColor(d.category);
     const label    = lineLabel(d);
@@ -951,7 +1005,7 @@ function renderDepartures() {
 
     return `
       <div class="${rowClass}" style="animation-delay:${Math.min(i,20)*0.04}s">
-        <div><div class="badge" style="background:${col}">${label}</div></div>
+        <div><div class="badge" style="background:${col};cursor:pointer" onclick="openStopPopup(window._filteredDeps[${i}])">${label}</div></div>
         <div class="dest-col">
           <div class="dest-name">${dest}</div>
           ${platform ? `<div class="dest-info">Gleis ${platform}</div>` : ''}
@@ -989,6 +1043,40 @@ function updateCountdowns() {
     cdEl.className = 'countdown ' + cdClass;
   });
 }
+
+// ── Stop popup ─────────────────────────────────────────────────────────────
+function openStopPopup(d) {
+  const col = lineColor(d.category);
+  document.getElementById('popupBadge').textContent = lineLabel(d);
+  document.getElementById('popupBadge').style.background = col;
+  document.getElementById('popupTitle').textContent = '→ ' + (d.to || '');
+
+  const passList = d.passList || [];
+  const fromIdx = passList.findIndex(p =>
+    normalize(p.station?.name) === normalize(fromStop?.name)
+  );
+  const stopsToShow = fromIdx >= 0 ? passList.slice(fromIdx) : passList;
+
+  document.getElementById('popupStops').innerHTML = stopsToShow.map((p, i) => {
+    const name = p.station?.name || '–';
+    const time = p.departure ? fmt(p.departure) : (p.arrival ? fmt(p.arrival) : '');
+    return `<div class="popup-stop${i === 0 ? ' origin' : ''}">
+      <div class="stop-dot"></div>
+      <span>${name}</span>
+      ${time ? `<span class="stop-time">${time}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('popupOverlay').classList.add('open');
+}
+
+function closePopup(e) {
+  if (e && e.target !== document.getElementById('popupOverlay') &&
+      !e.target.classList.contains('popup-close')) return;
+  document.getElementById('popupOverlay').classList.remove('open');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('popupOverlay').classList.remove('open'); });
 </script>
 </body>
 </html>
