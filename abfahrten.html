@@ -862,14 +862,14 @@ async function findLinesServingRoute(departures, toName) {
       const key       = `${journeyId}__${depTime.slice(0,16)}`;
       if (!matchingJourneys.has(key)) return;
 
-      // Extra direction check via passList if available
+      // Verify via passList that toStop appears AFTER fromStop.
+      // If passList is available but toStop is not found → trip doesn't reach destination → skip.
       const passList = d.passList || [];
       if (passList.length > 0) {
-        // Find index of fromStop and toStop in passList
         const fromIdx = passList.findIndex(p => normalize(p.station?.name) === normalize(fromStop.name));
         const toIdx   = passList.findIndex(p => normalize(p.station?.name) === normalize(toName));
-        // Only valid if toStop comes AFTER fromStop in the passList
-        if (fromIdx !== -1 && toIdx !== -1 && toIdx <= fromIdx) return;
+        // Require toStop to be found AND after fromStop
+        if (toIdx === -1 || (fromIdx !== -1 && toIdx <= fromIdx)) return;
       }
 
       validDepartureIds.add(d);
