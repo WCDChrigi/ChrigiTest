@@ -781,43 +781,51 @@ async function findLinesServingRoute(departures, toName) {
     const data = await res.json();
     const conns = data.connections || [];
 
-    // Build a Set of "lineKey__journeyId" pairs that actually serve the route
-    // A connection section must start at (or pass through) fromStop and reach toStop
+    // Build a Set of "journeyId__depTime" for direct sections only:
+    // - The section must board at fromStop (no transfers before our stop)
+    // - The section must be a direct journey leg (no walking/transfer)
     const matchingJourneys = new Set();
     conns.forEach(c => {
       (c.sections || []).forEach(sec => {
-        if (sec.journey) {
-          // sec.departure.station.name = where we board
-          // sec.arrival.station.name   = where we alight
-          const boardName = sec.departure?.station?.name || '';
-          const alightName = sec.arrival?.station?.name || '';
-          // Only count sections where we board at fromStop and alight at/toward toStop
-          if (normalize(boardName) === normalize(fromStop.name)) {
-            const journeyId = sec.journey.name || `${sec.journey.category||''}${sec.journey.number||''}`;
-            const depTime   = sec.departure?.departure || '';
-            matchingJourneys.add(`${journeyId}__${depTime.slice(0,16)}`);
-          }
-        }
+        if (!sec.journey) return; // skip walking/transfer sections
+        const boardName  = sec.departure?.station?.name || '';
+        // Only include sections where we actually board at fromStop
+        // This prevents transfer-legs that start elsewhere from matching
+        if (normalize(boardName) !== normalize(fromStop.name)) return;
+
+        const journeyId = sec.journey.name || `${sec.journey.category||''}${sec.journey.number||''}`;
+        const depTime   = sec.departure?.departure || '';
+        matchingJourneys.add(`${journeyId}__${depTime.slice(0,16)}`);
       });
     });
 
-    // Now map each departure to its journey ID + departure time
-    // and only keep departures whose journey appears in matchingJourneys
+    // Match each stationboard departure against the confirmed journeys.
+    // Double-check direction: the departure's passlist must contain toName
+    // AFTER the fromStop position (ensures correct direction).
     const validDepartureIds = new Set();
     departures.forEach(d => {
       const journeyId = d.name || `${d.category||''}${d.number||''}`;
       const depTime   = d.stop?.departure || '';
       const key       = `${journeyId}__${depTime.slice(0,16)}`;
-      if (matchingJourneys.has(key)) {
-        validDepartureIds.add(d);
+      if (!matchingJourneys.has(key)) return;
+
+      // Extra direction check via passList if available
+      const passList = d.passList || [];
+      if (passList.length > 0) {
+        // Find index of fromStop and toStop in passList
+        const fromIdx = passList.findIndex(p => normalize(p.station?.name) === normalize(fromStop.name));
+        const toIdx   = passList.findIndex(p => normalize(p.station?.name) === normalize(toName));
+        // Only valid if toStop comes AFTER fromStop in the passList
+        if (fromIdx !== -1 && toIdx !== -1 && toIdx <= fromIdx) return;
       }
+
+      validDepartureIds.add(d);
     });
 
-    // Return the filtered set of departure objects directly
-    // Store as a special marker so renderDepartures can use it
+    // Store per-departure validity so renderDepartures can use it
     validDepartures = validDepartureIds;
 
-    // Also return line keys for chip building (all lines that have at least one valid departure)
+    // Return line keys for chip building
     const matching = new Set();
     validDepartureIds.forEach(d => matching.add(lineKey(d)));
     return matching.size > 0 ? matching : null;
