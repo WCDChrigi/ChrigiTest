@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ÖV Abfahrtsanzeige Schweiz</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #07090f;
+      --surface: #0f1520;
+      --surface2: #141e2e;
+      --border: #1c2a3f;
+      --accent: #3b82f6;
+      --accent2: #06b6d4;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --text: #dde4f0;
+      --muted: #4a5a72;
+      --mono: 'DM Mono', monospace;
+      --display: 'Syne', sans-serif;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .wrapper {
+      position: relative;
+      z-index: 1;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 36px 20px 80px;
+    }
+
+    .chip {
+      display: inline-block;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent2);
+      border: 1px solid rgba(6,182,212,0.35);
+      padding: 3px 10px;
+      border-radius: 2px;
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-family: var(--display);
+      font-size: clamp(22px, 4.5vw, 38px);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .sub {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      margin-bottom: 28px;
+    }
+
+    /* ── From/To row ── */
+    .route-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .stop-block {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .stop-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      padding-left: 2px;
+    }
+    .search-wrap {
+      position: relative;
+    }
+    .search-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 13px;
+      pointer-events: none;
+    }
+    .stop-input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      padding: 11px 12px 11px 34px;
+      border-radius: 6px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .stop-input:focus { border-color: var(--accent); }
+    .stop-input::placeholder { color: var(--muted); }
+    .stop-input.has-value { border-color: rgba(59,130,246,0.4); }
+
+    .sug-box {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      z-index: 200;
+      display: none;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    }
+    .sug-item {
+      padding: 9px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      transition: background 0.12s;
+      color: var(--text);
+    }
+    .sug-item:hover, .sug-item.active { background: var(--border); }
+    .sug-item .sug-dist { font-size: 10px; color: var(--muted); margin-left: auto; }
+
+    /* Swap button */
+    .swap-btn {
+      flex-shrink: 0;
+      width: 38px;
+      height: 38px;
+      margin-top: 20px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s, transform 0.25s;
+    }
+    .swap-btn:hover { background: var(--border); color: var(--accent2); }
+    .swap-btn.spinning { transform: rotate(180deg); }
+
+    /* Route summary badge */
+    .route-summary {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .route-summary.visible { display: flex; }
+    .route-summary .from-badge, .route-summary .to-badge {
+      padding: 3px 10px;
+      border-radius: 3px;
+      font-size: 11px;
+      border: 1px solid var(--border);
+    }
+    .route-summary .from-badge { color: var(--accent);  border-color: rgba(59,130,246,0.3); }
+    .route-summary .to-badge   { color: var(--accent2); border-color: rgba(6,182,212,0.3); }
+    .route-summary .arrow { color: var(--muted); }
+
+    /* Filter */
+    .filter-section { margin-bottom: 22px; display: none; }
+    .filter-section.visible { display: block; }
+    .filter-header {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .filter-actions { display: flex; gap: 7px; margin-left: auto; }
+    .filter-actions button {
+      font-size: 9px;
+      padding: 3px 9px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .filter-actions button:hover { border-color: var(--accent); color: var(--accent); }
+    #lineChips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .line-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 11px;
+      border-radius: 4px;
+      border: 1px solid transparent;
+      font-size: 11px;
+      font-family: var(--mono);
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      user-select: none;
+    }
+    .line-chip .num { font-weight: 500; }
+    .line-chip .dest-short { color: rgba(255,255,255,0.55); font-size: 10px; }
+    .line-chip.active  { opacity: 1; }
+    .line-chip.inactive { opacity: 0.25; }
+    .line-chip:active { transform: scale(0.94); }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .clock { font-size: 11px; color: var(--muted); margin-left: auto; }
+    .clock span { color: var(--text); }
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 9px 16px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background 0.2s, transform 0.1s;
+    }
+    button.primary:hover { background: #2563eb; }
+    button.primary:active { transform: scale(0.97); }
+    button.primary:disabled { background: var(--muted); cursor: not-allowed; }
+
+    /* Status */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 14px;
+      min-height: 20px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    .dot.loading { background: var(--yellow); animation: blink 0.55s infinite; }
+    .dot.error   { background: var(--red); animation: none; }
+    .dot.idle    { background: var(--muted); animation: none; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.35} }
+    @keyframes blink { 0%,100%{opacity:1}50%{opacity:0} }
+
+    /* Table */
+    .table-head {
+      display: grid;
+      grid-template-columns: 90px 1fr 80px 90px;
+      gap: 12px;
+      padding: 6px 16px;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 2px;
+    }
+    .table-head .right { text-align: right; }
+    #departures { display: flex; flex-direction: column; gap: 2px; }
+
+    .dep-row {
+      display: grid;
+      grid-template-columns: 90px 1fr 80px 90px;
+      gap: 12px;
+      align-items: center;
+      padding: 13px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      animation: slideIn 0.25s ease both;
+      transition: background 0.15s;
+    }
+    .dep-row:nth-child(even) { background: var(--surface2); }
+    .dep-row:hover { background: #182235; }
+    .dep-row.delayed   { border-left-color: var(--yellow); }
+    .dep-row.cancelled { border-left-color: var(--red); opacity: 0.5; }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 9px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #fff;
+      white-space: nowrap;
+      max-width: 82px;
+    }
+    .dest-col { display: flex; flex-direction: column; gap: 2px; }
+    .dest-name { font-size: 14px; color: #fff; }
+    .dest-info { font-size: 10px; color: var(--muted); }
+    .dest-info.warn { color: var(--red); }
+    .dest-info.delay { color: var(--yellow); }
+
+    .countdown {
+      text-align: right;
+      font-size: 20px;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+    .countdown.soon { color: var(--yellow); }
+    .countdown.now  { color: var(--red); }
+
+    .dep-time {
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+    }
+    .dep-time .t  { font-size: 16px; color: var(--text); }
+    .dep-time .rt { font-size: 11px; color: var(--yellow); }
+
+    /* Empty / skeleton */
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .empty .icon { font-size: 36px; display: block; margin-bottom: 12px; }
+
+    .skel-row {
+      display: grid;
+      grid-template-columns: 90px 1fr 80px 90px;
+      gap: 12px;
+      align-items: center;
+      padding: 13px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border);
+      margin-bottom: 2px;
+    }
+    .skel {
+      height: 14px;
+      background: linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.1s infinite;
+      border-radius: 3px;
+    }
+    @keyframes shimmer { 0%{background-position:200% 0}100%{background-position:-200% 0} }
+
+    footer {
+      margin-top: 40px;
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+      letter-spacing: 0.05em;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+
+    @media (max-width: 500px) {
+      .table-head, .dep-row, .skel-row {
+        grid-template-columns: 70px 1fr 55px 70px;
+      }
+      .route-row { flex-wrap: wrap; }
+      .swap-btn { margin-top: 0; order: 3; margin-left: auto; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+
+  <div class="chip">ÖV Abfahrtsanzeige · Live</div>
+  <h1>Abfahrtsanzeige</h1>
+  <p class="sub">Von / Nach eingeben → Linien filtern → Live-Abfahrten</p>
+
+  <!-- From / Swap / To -->
+  <div class="route-row">
+    <div class="stop-block">
+      <div class="stop-label">Von</div>
+      <div class="search-wrap">
+        <span class="search-icon">◉</span>
+        <input id="fromInput" class="stop-input" type="text"
+               placeholder="Abfahrtshaltestelle …" autocomplete="off" />
+        <div id="fromSug" class="sug-box"></div>
+      </div>
+    </div>
+
+    <button class="swap-btn" id="swapBtn" title="Von/Nach tauschen" onclick="swapStops()">⇄</button>
+
+    <div class="stop-block">
+      <div class="stop-label">Nach (optional)</div>
+      <div class="search-wrap">
+        <span class="search-icon" style="color:var(--accent2)">◎</span>
+        <input id="toInput" class="stop-input" type="text"
+               placeholder="Zielhaltestelle …" autocomplete="off" />
+        <div id="toSug" class="sug-box"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Route summary -->
+  <div class="route-summary" id="routeSummary">
+    <span class="from-badge" id="summFrom"></span>
+    <span class="arrow">→</span>
+    <span class="to-badge" id="summTo"></span>
+    <span id="summCount" style="margin-left:4px"></span>
+  </div>
+
+  <!-- Line filter -->
+  <div class="filter-section" id="filterSection">
+    <div class="filter-header">
+      Linien filtern
+      <div class="filter-actions">
+        <button onclick="selectAll()">Alle</button>
+        <button onclick="deselectAll()">Keine</button>
+      </div>
+    </div>
+    <div id="lineChips"></div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" id="controlsBar" style="display:none">
+    <button class="primary" id="refreshBtn" onclick="loadDepartures()">↻ Aktualisieren</button>
+    <button class="primary" id="copyBtn" onclick="copyLink()" style="background:var(--surface);border:1px solid var(--border);color:var(--muted)">🔗 Link kopieren</button>
+    <div class="clock">Jetzt: <span id="clock">--:--:--</span></div>
+  </div>
+
+  <!-- Status -->
+  <div class="status-bar" id="statusBar" style="display:none">
+    <div class="dot idle" id="dot"></div>
+    <span id="statusText">Bereit</span>
+  </div>
+
+  <div id="tableHead" class="table-head" style="display:none">
+    <div>Linie</div>
+    <div>Endstation</div>
+    <div class="right">In</div>
+    <div class="right">Abfahrt</div>
+  </div>
+  <div id="departures"></div>
+
+  <footer>Daten: <a href="https://transport.opendata.ch" target="_blank">transport.opendata.ch</a> · Fahrplan © SBB / Alle Transportunternehmen</footer>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let fromStop = null;   // { name, id }
+let toStop   = null;   // { name, id } | null
+let allDepartures  = [];   // raw stationboard
+let validLineKeys  = null; // Set of line keys that serve the route, or null = no filter
+let activeLines    = new Set();
+let allLines       = new Set();
+let refreshTimer   = null;
+let countdownTimer = null;
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('de-CH');
+}, 1000);
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function fmt(iso) {
+  if (!iso) return '--:--';
+  return new Date(iso).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+}
+function minutesUntil(iso) {
+  if (!iso) return null;
+  return Math.floor((new Date(iso) - Date.now()) / 60000);
+}
+function lineColor(cat) {
+  if (!cat) return '#374151';
+  const c = cat.toUpperCase();
+  if (c === 'IC')  return '#003f8e';
+  if (c === 'IR')  return '#c0392b';
+  if (c === 'RE')  return '#e67e22';
+  if (c === 'EC')  return '#6d28d9';
+  if (c.startsWith('S')) return '#047857';
+  if (c === 'B' || c === 'NFB') return '#0369a1';
+  if (c === 'T' || c === 'NFT') return '#0f766e';
+  if (c === 'BAT') return '#075985';
+  return '#374151';
+}
+function lighten(hex) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `rgb(${Math.min(255,r+90)},${Math.min(255,g+90)},${Math.min(255,b+90)})`;
+}
+function lineKey(d)   { return `${d.category||''}__${d.number||''}`; }
+function lineLabel(d) { return `${d.category||''} ${d.number||''}`.trim() || '?'; }
+
+// ── Autocomplete factory ───────────────────────────────────────────────────
+function makeAutocomplete(inputId, sugBoxId, role) {
+  const input  = document.getElementById(inputId);
+  const sugBox = document.getElementById(sugBoxId);
+  let items = [], active = -1, timer = null;
+
+  function hide() {
+    sugBox.style.display = 'none';
+    sugBox.innerHTML = '';
+    items = []; active = -1;
+  }
+
+  function setActive(idx) {
+    const els = sugBox.querySelectorAll('.sug-item');
+    active = Math.max(-1, Math.min(els.length - 1, idx));
+    els.forEach((el, i) => el.classList.toggle('active', i === active));
+  }
+
+  async function fetch_(q) {
+    try {
+      const res  = await fetch(`https://transport.opendata.ch/v1/locations?query=${encodeURIComponent(q)}&type=station`);
+      const data = await res.json();
+      const locs = (data.stations || []).filter(s => s.name).slice(0, 7);
+      items = locs; active = -1;
+      if (!locs.length) { hide(); return; }
+      sugBox.innerHTML = locs.map((s, i) => `
+        <div class="sug-item" data-i="${i}">
+          <span style="color:var(--muted);font-size:11px">${role==='from'?'◉':'◎'}</span>
+          <span>${s.name}</span>
+          ${s.distance ? `<span class="sug-dist">${s.distance}m</span>` : ''}
+        </div>`).join('');
+      sugBox.querySelectorAll('.sug-item').forEach((el, i) =>
+        el.addEventListener('mousedown', (e) => { e.preventDefault(); pick(locs[i]); }));
+      sugBox.style.display = 'block';
+    } catch(e) { hide(); }
+  }
+
+  function pick(stop) {
+    input.value = stop.name;
+    input.classList.add('has-value');
+    hide();
+    if (role === 'from') { fromStop = stop; }
+    else                 { toStop   = stop; }
+    onStopChange();
+  }
+
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (role === 'from') { fromStop = null; }
+    else                 { toStop = null; }
+    input.classList.remove('has-value');
+    if (q.length < 2) { hide(); return; }
+    timer = setTimeout(() => fetch_(q), 270);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (!items.length) return;
+    if (e.key === 'ArrowDown')  { e.preventDefault(); setActive(active + 1); }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setActive(active - 1); }
+    else if (e.key === 'Enter')  {
+      e.preventDefault();
+      pick(items[active >= 0 ? active : 0]);
+    }
+    else if (e.key === 'Escape') hide();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!input.contains(e.target) && !sugBox.contains(e.target)) hide();
+  });
+
+  // expose for swap
+  return {
+    setValue(stop) {
+      if (stop) { input.value = stop.name; input.classList.add('has-value'); }
+      else      { input.value = ''; input.classList.remove('has-value'); }
+    }
+  };
+}
+
+const fromAC = makeAutocomplete('fromInput', 'fromSug', 'from');
+const toAC   = makeAutocomplete('toInput',   'toSug',   'to');
+
+// ── URL persistence ────────────────────────────────────────────────────────
+function updateURL() {
+  const params = new URLSearchParams();
+  if (fromStop) params.set('from', fromStop.name);
+  if (toStop)   params.set('to',   toStop.name);
+  const newUrl = params.toString()
+    ? location.pathname + '?' + params.toString()
+    : location.pathname;
+  history.replaceState(null, '', newUrl);
+  if (fromStop) {
+    document.title = toStop
+      ? fromStop.name + ' → ' + toStop.name
+      : 'Ab ' + fromStop.name + ' · ÖV';
+  } else {
+    document.title = 'ÖV Abfahrtsanzeige Schweiz';
+  }
+}
+
+async function resolveStop(name) {
+  const res  = await fetch('https://transport.opendata.ch/v1/locations?query=' + encodeURIComponent(name) + '&type=station');
+  const data = await res.json();
+  return (data.stations || []).find(s => s.name) || null;
+}
+
+async function initFromURL() {
+  const params = new URLSearchParams(location.search);
+  const fromQ  = params.get('from');
+  const toQ    = params.get('to');
+  if (!fromQ) return;
+  document.getElementById('statusBar').style.display   = 'flex';
+  document.getElementById('controlsBar').style.display = 'flex';
+  document.getElementById('dot').className = 'dot loading';
+  document.getElementById('statusText').textContent = 'Lade gespeicherte Route …';
+  const [fStop, tStop] = await Promise.all([
+    resolveStop(fromQ),
+    toQ ? resolveStop(toQ) : Promise.resolve(null)
+  ]);
+  if (fStop) { fromStop = fStop; fromAC.setValue(fStop); }
+  if (tStop) { toStop   = tStop; toAC.setValue(tStop); }
+  if (fromStop) { updateURL(); loadDepartures(); }
+}
+
+initFromURL();
+
+// ── Copy link ──────────────────────────────────────────────────────────────
+function copyLink() {
+  const url = location.href;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('copyBtn');
+    const orig = btn.textContent;
+    btn.textContent = '✓ Kopiert!';
+    btn.style.color = 'var(--green)';
+    btn.style.borderColor = 'var(--green)';
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.style.color = '';
+      btn.style.borderColor = '';
+    }, 2000);
+  });
+}
+
+// ── Swap ───────────────────────────────────────────────────────────────────
+function swapStops() {
+  const btn = document.getElementById('swapBtn');
+  btn.classList.add('spinning');
+  setTimeout(() => btn.classList.remove('spinning'), 300);
+
+  const tmp = fromStop;
+  fromStop = toStop;
+  toStop   = tmp;
+
+  fromAC.setValue(fromStop);
+  toAC.setValue(toStop);
+
+  onStopChange();
+}
+
+// ── On stop change ─────────────────────────────────────────────────────────
+function onStopChange() {
+  updateURL();
+  if (!fromStop) {
+    document.getElementById('controlsBar').style.display = 'none';
+    document.getElementById('statusBar').style.display   = 'none';
+    document.getElementById('tableHead').style.display   = 'none';
+    document.getElementById('departures').innerHTML = '';
+    document.getElementById('filterSection').classList.remove('visible');
+    document.getElementById('routeSummary').classList.remove('visible');
+    return;
+  }
+  document.getElementById('controlsBar').style.display = 'flex';
+  document.getElementById('statusBar').style.display   = 'flex';
+  loadDepartures();
+}
+
+// ── Load departures ────────────────────────────────────────────────────────
+async function loadDepartures() {
+  if (!fromStop) return;
+  const btn    = document.getElementById('refreshBtn');
+  const dot    = document.getElementById('dot');
+  const status = document.getElementById('statusText');
+
+  btn.disabled = true;
+  dot.className = 'dot loading';
+  status.textContent = 'Lade Abfahrten …';
+
+  document.getElementById('departures').innerHTML = Array(8).fill(0).map(() => `
+    <div class="skel-row">
+      <div class="skel" style="width:58px;height:26px;border-radius:3px"></div>
+      <div><div class="skel" style="width:140px;margin-bottom:5px"></div><div class="skel" style="width:70px;height:10px"></div></div>
+      <div class="skel" style="width:36px;height:22px;margin-left:auto"></div>
+      <div class="skel" style="width:42px;height:18px;margin-left:auto"></div>
+    </div>`).join('');
+
+  try {
+    // 1) Load stationboard for the FROM stop
+    const id  = fromStop.id || fromStop.name;
+    const res = await fetch(`https://transport.opendata.ch/v1/stationboard?id=${encodeURIComponent(id)}&limit=80`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    allDepartures = data.stationboard || [];
+
+    // 2) If toStop set, find which lines pass through it
+    if (toStop) {
+      validLineKeys = await findLinesServingRoute(allDepartures, toStop.name);
+    } else {
+      validLineKeys = null;
+    }
+
+    // 3) Collect lines (apply route filter for chip building)
+    const prevLines = new Set(allLines);
+    allLines.clear();
+    allDepartures.forEach(d => {
+      if (validLineKeys === null || validLineKeys.has(lineKey(d))) {
+        allLines.add(lineKey(d));
+      }
+    });
+
+    if (prevLines.size === 0) {
+      activeLines = new Set(allLines);
+    } else {
+      activeLines = new Set([...activeLines].filter(k => allLines.has(k)));
+      allLines.forEach(k => { if (!prevLines.has(k)) activeLines.add(k); });
+    }
+
+    buildLineChips();
+    renderDepartures();
+    updateRouteSummary();
+
+    const t = new Date().toLocaleTimeString('de-CH', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    dot.className = 'dot';
+    status.textContent = `Aktualisiert ${t} · ${allDepartures.length} Abfahrten geladen`;
+  } catch(e) {
+    dot.className = 'dot error';
+    status.textContent = `Fehler: ${e.message}`;
+    document.getElementById('departures').innerHTML =
+      `<div class="empty"><span class="icon">⚠️</span>Verbindung fehlgeschlagen.</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(loadDepartures, 60000);
+}
+
+// ── Find lines that pass through destination ───────────────────────────────
+async function findLinesServingRoute(departures, toName) {
+  // Get unique line keys from departures
+  const lineKeys = [...new Set(departures.map(lineKey))];
+  // For each line, check if the destination appears in the stops list of a journey
+  // We use the connections API to find which lines serve fromStop → toStop
+  try {
+    const url = `https://transport.opendata.ch/v1/connections?from=${encodeURIComponent(fromStop.name)}&to=${encodeURIComponent(toName)}&limit=12`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    const conns = data.connections || [];
+
+    const matching = new Set();
+    conns.forEach(c => {
+      (c.sections || []).forEach(sec => {
+        if (sec.journey) {
+          const k = `${sec.journey.category||''}__${sec.journey.number||''}`;
+          matching.add(k);
+        }
+      });
+    });
+    return matching.size > 0 ? matching : null; // null = show all if no match found
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── Route summary ─────────────────────────────────────────────────────────
+function updateRouteSummary() {
+  const el = document.getElementById('routeSummary');
+  if (!fromStop) { el.classList.remove('visible'); return; }
+  document.getElementById('summFrom').textContent = fromStop.name;
+  document.getElementById('summTo').textContent   = toStop ? toStop.name : 'Alle Ziele';
+  const shown = allDepartures.filter(d => {
+    const k = lineKey(d);
+    return activeLines.has(k) && (validLineKeys === null || validLineKeys.has(k));
+  }).length;
+  document.getElementById('summCount').textContent =
+    validLineKeys !== null ? `· ${validLineKeys.size} passende Linie${validLineKeys.size!==1?'n':''}` : '';
+  el.classList.add('visible');
+}
+
+// ── Line chips ─────────────────────────────────────────────────────────────
+function buildLineChips() {
+  const seen = new Map();
+  allDepartures.forEach(d => {
+    const k = lineKey(d);
+    if (allLines.has(k) && !seen.has(k)) seen.set(k, d);
+  });
+
+  const container = document.getElementById('lineChips');
+  container.innerHTML = '';
+
+  [...seen.entries()].sort(([a],[b]) => a.localeCompare(b)).forEach(([key, d]) => {
+    const chip = document.createElement('div');
+    chip.className = 'line-chip ' + (activeLines.has(key) ? 'active' : 'inactive');
+    chip.dataset.key = key;
+    const col = lineColor(d.category);
+    chip.style.background   = col + '1e';
+    chip.style.borderColor  = col + '80';
+    const dest = (d.to || '').split(',')[0].trim();
+    chip.innerHTML =
+      `<span class="num" style="color:${lighten(col)}">${lineLabel(d)}</span>` +
+      (dest ? `<span class="dest-short">${dest}</span>` : '');
+    chip.addEventListener('click', () => toggleLine(key));
+    container.appendChild(chip);
+  });
+
+  document.getElementById('filterSection').classList.add('visible');
+}
+
+function toggleLine(key) {
+  if (activeLines.has(key)) {
+    if (activeLines.size === 1) return;
+    activeLines.delete(key);
+  } else {
+    activeLines.add(key);
+  }
+  updateChipStates();
+  renderDepartures();
+}
+function updateChipStates() {
+  document.querySelectorAll('.line-chip').forEach(c =>
+    c.className = 'line-chip ' + (activeLines.has(c.dataset.key) ? 'active' : 'inactive'));
+}
+function selectAll()   { allLines.forEach(k => activeLines.add(k)); updateChipStates(); renderDepartures(); }
+function deselectAll() {
+  const first = [...allLines][0];
+  activeLines.clear();
+  if (first) activeLines.add(first);
+  updateChipStates();
+  renderDepartures();
+}
+
+// ── Render rows ────────────────────────────────────────────────────────────
+function renderDepartures() {
+  const filtered = allDepartures.filter(d => {
+    const k = lineKey(d);
+    return activeLines.has(k) && (validLineKeys === null || validLineKeys.has(k));
+  });
+
+  const head = document.getElementById('tableHead');
+  if (!filtered.length) {
+    head.style.display = 'none';
+    document.getElementById('departures').innerHTML =
+      `<div class="empty"><span class="icon">🔍</span>Keine passenden Abfahrten.</div>`;
+    return;
+  }
+  head.style.display = 'grid';
+
+  document.getElementById('departures').innerHTML = filtered.map((d, i) => {
+    const col      = lineColor(d.category);
+    const label    = lineLabel(d);
+    const dest     = d.to || '–';
+    const depIso   = d.stop?.departure;
+    const rtIso    = d.stop?.realtimeDeparture;
+    const delay    = d.stop?.delay || 0;
+    const platform = d.stop?.platform;
+    const cancelled = d.stop?.cancelled;
+
+    const useTime = rtIso || depIso;
+    const mins    = minutesUntil(useTime);
+
+    let cdClass = '', cdText = '';
+    if (mins === null)   cdText = '–';
+    else if (mins < 0)  cdText = 'Weg';
+    else if (mins === 0){ cdText = 'Jetzt'; cdClass = 'now'; }
+    else if (mins <= 4) { cdText = `${mins}'`;  cdClass = 'soon'; }
+    else                  cdText = `${mins}'`;
+
+    let rowClass = 'dep-row';
+    if (cancelled) rowClass += ' cancelled';
+    else if (delay > 0) rowClass += ' delayed';
+
+    return `
+      <div class="${rowClass}" style="animation-delay:${Math.min(i,20)*0.04}s">
+        <div><div class="badge" style="background:${col}">${label}</div></div>
+        <div class="dest-col">
+          <div class="dest-name">${dest}</div>
+          ${platform ? `<div class="dest-info">Gleis ${platform}</div>` : ''}
+          ${cancelled ? `<div class="dest-info warn">Fällt aus</div>` : ''}
+          ${!cancelled && delay > 0 ? `<div class="dest-info delay">+${delay} Min</div>` : ''}
+        </div>
+        <div class="countdown ${cdClass}">${cdText}</div>
+        <div class="dep-time">
+          <div class="t">${fmt(depIso)}</div>
+          ${delay > 0 && rtIso ? `<div class="rt">${fmt(rtIso)}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(updateCountdowns, 20000);
+}
+
+function updateCountdowns() {
+  const filtered = allDepartures.filter(d => {
+    const k = lineKey(d);
+    return activeLines.has(k) && (validLineKeys === null || validLineKeys.has(k));
+  });
+  document.querySelectorAll('.dep-row').forEach((row, i) => {
+    const d = filtered[i];
+    if (!d) return;
+    const useTime = d.stop?.realtimeDeparture || d.stop?.departure;
+    const mins = minutesUntil(useTime);
+    const cdEl = row.querySelector('.countdown');
+    if (!cdEl) return;
+    let cdClass = '', cdText = '';
+    if (mins === null)   cdText = '–';
+    else if (mins < 0)  cdText = 'Weg';
+    else if (mins === 0){ cdText = 'Jetzt'; cdClass = 'now'; }
+    else if (mins <= 4) { cdText = `${mins}'`;  cdClass = 'soon'; }
+    else                  cdText = `${mins}'`;
+    cdEl.textContent = cdText;
+    cdEl.className = 'countdown ' + cdClass;
+  });
+}
+</script>
+</body>
+</html>
