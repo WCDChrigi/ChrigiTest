@@ -523,6 +523,7 @@ function lighten(hex) {
 }
 function lineKey(d)   { return `${d.category||''}__${d.number||''}`; }
 function lineLabel(d) { return `${d.category||''} ${d.number||''}`.trim() || '?'; }
+function normalize(s) { return (s || '').toLowerCase().trim(); }
 
 // ── Autocomplete factory ───────────────────────────────────────────────────
 function makeAutocomplete(inputId, sugBoxId, role) {
@@ -729,6 +730,7 @@ async function loadDepartures() {
     allDepartures = data.stationboard || [];
 
     // 2) If toStop set, find which lines pass through it
+    validDepartures = null;
     if (toStop) {
       validLineKeys = await findLinesServingRoute(allDepartures, toStop.name);
     } else {
@@ -773,30 +775,59 @@ async function loadDepartures() {
 
 // ── Find lines that pass through destination ───────────────────────────────
 async function findLinesServingRoute(departures, toName) {
-  // Get unique line keys from departures
-  const lineKeys = [...new Set(departures.map(lineKey))];
-  // For each line, check if the destination appears in the stops list of a journey
-  // We use the connections API to find which lines serve fromStop → toStop
   try {
-    const url = `https://transport.opendata.ch/v1/connections?from=${encodeURIComponent(fromStop.name)}&to=${encodeURIComponent(toName)}&limit=12`;
+    const url = `https://transport.opendata.ch/v1/connections?from=${encodeURIComponent(fromStop.name)}&to=${encodeURIComponent(toName)}&limit=16`;
     const res  = await fetch(url);
     const data = await res.json();
     const conns = data.connections || [];
 
-    const matching = new Set();
+    // Build a Set of "lineKey__journeyId" pairs that actually serve the route
+    // A connection section must start at (or pass through) fromStop and reach toStop
+    const matchingJourneys = new Set();
     conns.forEach(c => {
       (c.sections || []).forEach(sec => {
         if (sec.journey) {
-          const k = `${sec.journey.category||''}__${sec.journey.number||''}`;
-          matching.add(k);
+          // sec.departure.station.name = where we board
+          // sec.arrival.station.name   = where we alight
+          const boardName = sec.departure?.station?.name || '';
+          const alightName = sec.arrival?.station?.name || '';
+          // Only count sections where we board at fromStop and alight at/toward toStop
+          if (normalize(boardName) === normalize(fromStop.name)) {
+            const journeyId = sec.journey.name || `${sec.journey.category||''}${sec.journey.number||''}`;
+            const depTime   = sec.departure?.departure || '';
+            matchingJourneys.add(`${journeyId}__${depTime.slice(0,16)}`);
+          }
         }
       });
     });
-    return matching.size > 0 ? matching : null; // null = show all if no match found
+
+    // Now map each departure to its journey ID + departure time
+    // and only keep departures whose journey appears in matchingJourneys
+    const validDepartureIds = new Set();
+    departures.forEach(d => {
+      const journeyId = d.name || `${d.category||''}${d.number||''}`;
+      const depTime   = d.stop?.departure || '';
+      const key       = `${journeyId}__${depTime.slice(0,16)}`;
+      if (matchingJourneys.has(key)) {
+        validDepartureIds.add(d);
+      }
+    });
+
+    // Return the filtered set of departure objects directly
+    // Store as a special marker so renderDepartures can use it
+    validDepartures = validDepartureIds;
+
+    // Also return line keys for chip building (all lines that have at least one valid departure)
+    const matching = new Set();
+    validDepartureIds.forEach(d => matching.add(lineKey(d)));
+    return matching.size > 0 ? matching : null;
   } catch(e) {
     return null;
   }
 }
+
+// ── Per-departure validity check ───────────────────────────────────────────
+let validDepartures = null; // Set of departure objects that actually reach toStop
 
 // ── Route summary ─────────────────────────────────────────────────────────
 function updateRouteSummary() {
@@ -804,10 +835,7 @@ function updateRouteSummary() {
   if (!fromStop) { el.classList.remove('visible'); return; }
   document.getElementById('summFrom').textContent = fromStop.name;
   document.getElementById('summTo').textContent   = toStop ? toStop.name : 'Alle Ziele';
-  const shown = allDepartures.filter(d => {
-    const k = lineKey(d);
-    return activeLines.has(k) && (validLineKeys === null || validLineKeys.has(k));
-  }).length;
+  const shown = allDepartures.filter(isDepartureVisible).length;
   document.getElementById('summCount').textContent =
     validLineKeys !== null ? `· ${validLineKeys.size} passende Linie${validLineKeys.size!==1?'n':''}` : '';
   el.classList.add('visible');
@@ -865,12 +893,20 @@ function deselectAll() {
   renderDepartures();
 }
 
+// ── Departure filter helper ────────────────────────────────────────────────
+function isDepartureVisible(d) {
+  const k = lineKey(d);
+  if (!activeLines.has(k)) return false;
+  // If we have per-departure validity (toStop set), use that
+  if (validDepartures !== null) return validDepartures.has(d);
+  // Otherwise fall back to line-level filter
+  if (validLineKeys !== null) return validLineKeys.has(k);
+  return true;
+}
+
 // ── Render rows ────────────────────────────────────────────────────────────
 function renderDepartures() {
-  const filtered = allDepartures.filter(d => {
-    const k = lineKey(d);
-    return activeLines.has(k) && (validLineKeys === null || validLineKeys.has(k));
-  });
+  const filtered = allDepartures.filter(isDepartureVisible);
 
   const head = document.getElementById('tableHead');
   if (!filtered.length) {
@@ -927,10 +963,7 @@ function renderDepartures() {
 }
 
 function updateCountdowns() {
-  const filtered = allDepartures.filter(d => {
-    const k = lineKey(d);
-    return activeLines.has(k) && (validLineKeys === null || validLineKeys.has(k));
-  });
+  const filtered = allDepartures.filter(isDepartureVisible);
   document.querySelectorAll('.dep-row').forEach((row, i) => {
     const d = filtered[i];
     if (!d) return;
