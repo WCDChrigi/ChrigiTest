@@ -499,6 +499,10 @@
   <!-- Controls -->
   <div class="controls" id="controlsBar" style="display:none">
     <button class="primary" id="refreshBtn" onclick="loadDepartures()">↻ Aktualisieren</button>
+    <button class="primary" id="directBtn" onclick="toggleDirectOnly()"
+      style="background:var(--accent);border:1px solid var(--accent);color:#fff;display:none">
+      ⇉ Nur Direkte
+    </button>
     <button class="primary" id="copyBtn" onclick="copyLink()" style="background:var(--surface);border:1px solid var(--border);color:var(--muted)">🔗 Link kopieren</button>
     <div class="clock">Jetzt: <span id="clock">--:--:--</span></div>
   </div>
@@ -533,6 +537,7 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
+let directOnly = true; // true = nur direkte Fahrten anzeigen
 let fromStop = null;   // { name, id }
 let toStop   = null;   // { name, id } | null
 let allDepartures  = [];   // raw stationboard
@@ -748,6 +753,7 @@ function onStopChange() {
     document.getElementById('departures').innerHTML = '';
     document.getElementById('filterSection').classList.remove('visible');
     document.getElementById('routeSummary').classList.remove('visible');
+    document.getElementById('directBtn').style.display = 'none';
     return;
   }
   document.getElementById('controlsBar').style.display = 'flex';
@@ -784,10 +790,19 @@ async function loadDepartures() {
 
     // 2) If toStop set, find which lines pass through it
     validDepartures = null;
+    window._directDeps   = null;
+    window._indirectDeps = null;
     if (toStop) {
       validLineKeys = await findLinesServingRoute(allDepartures, toStop.name);
+      // Show/style the direct-only toggle button
+      const db = document.getElementById('directBtn');
+      db.style.display    = '';
+      db.style.background  = directOnly ? 'var(--accent)' : 'var(--surface)';
+      db.style.borderColor = directOnly ? 'var(--accent)' : 'var(--border)';
+      db.style.color       = directOnly ? '#fff'          : 'var(--muted)';
     } else {
       validLineKeys = null;
+      document.getElementById('directBtn').style.display = 'none';
     }
 
     // 3) Collect lines (apply route filter for chip building)
@@ -852,36 +867,35 @@ async function findLinesServingRoute(departures, toName) {
       });
     });
 
-    // Match each stationboard departure against the confirmed journeys.
-    // Double-check direction: the departure's passlist must contain toName
-    // AFTER the fromStop position (ensures correct direction).
-    const validDepartureIds = new Set();
+    // Classify each stationboard departure as direct or indirect (first leg of transfer)
+    const directDeps   = new Set();
+    const indirectDeps = new Set();
     departures.forEach(d => {
       const journeyId = d.name || `${d.category||''}${d.number||''}`;
       const depTime   = d.stop?.departure || '';
       const key       = `${journeyId}__${depTime.slice(0,16)}`;
       if (!matchingJourneys.has(key)) return;
 
-      // Verify via passList that toStop appears AFTER fromStop.
-      // If passList is available but toStop is not found → trip doesn't reach destination → skip.
       const passList = d.passList || [];
       if (passList.length > 0) {
         const fromIdx = passList.findIndex(p => normalize(p.station?.name) === normalize(fromStop.name));
         const toIdx   = passList.findIndex(p => normalize(p.station?.name) === normalize(toName));
-        // Require toStop to be found AND after fromStop
-        if (toIdx === -1 || (fromIdx !== -1 && toIdx <= fromIdx)) return;
+        if (toIdx !== -1 && (fromIdx === -1 || toIdx > fromIdx)) {
+          directDeps.add(d);   // toStop found after fromStop → direct
+        } else if (toIdx === -1) {
+          indirectDeps.add(d); // toStop not in passList → first leg of transfer
+        }
+      } else {
+        directDeps.add(d); // no passList → assume direct
       }
-
-      validDepartureIds.add(d);
     });
 
-    // Store per-departure validity so renderDepartures can use it
-    validDepartures = validDepartureIds;
+    // Store both sets globally for toggling without re-fetching
+    window._directDeps   = directDeps;
+    window._indirectDeps = indirectDeps;
 
-    // Return line keys for chip building
-    const matching = new Set();
-    validDepartureIds.forEach(d => matching.add(lineKey(d)));
-    return matching.size > 0 ? matching : null;
+    // Apply current filter mode and return line keys
+    return applyDirectFilter();
   } catch(e) {
     return null;
   }
@@ -889,6 +903,43 @@ async function findLinesServingRoute(departures, toName) {
 
 // ── Per-departure validity check ───────────────────────────────────────────
 let validDepartures = null; // Set of departure objects that actually reach toStop
+
+// ── Apply direct/indirect filter and return validLineKeys ──────────────────
+function applyDirectFilter() {
+  if (!window._directDeps) return null;
+  validDepartures = directOnly
+    ? window._directDeps
+    : new Set([...window._directDeps, ...window._indirectDeps]);
+  const matching = new Set();
+  validDepartures.forEach(d => matching.add(lineKey(d)));
+  return matching.size > 0 ? matching : null;
+}
+
+// ── Toggle direct-only mode ────────────────────────────────────────────────
+function toggleDirectOnly() {
+  directOnly = !directOnly;
+  const btn = document.getElementById('directBtn');
+  if (directOnly) {
+    btn.style.background  = 'var(--accent)';
+    btn.style.borderColor = 'var(--accent)';
+    btn.style.color       = '#fff';
+  } else {
+    btn.style.background  = 'var(--surface)';
+    btn.style.borderColor = 'var(--border)';
+    btn.style.color       = 'var(--muted)';
+  }
+  validLineKeys = applyDirectFilter();
+  // Rebuild chips with new filter, keep activeLines in sync
+  allLines.clear();
+  allDepartures.forEach(d => {
+    if (validLineKeys === null || validLineKeys.has(lineKey(d))) allLines.add(lineKey(d));
+  });
+  activeLines = new Set([...activeLines].filter(k => allLines.has(k)));
+  allLines.forEach(k => { if (!activeLines.has(k)) activeLines.add(k); });
+  buildLineChips();
+  renderDepartures();
+  updateRouteSummary();
+}
 
 // ── Route summary ─────────────────────────────────────────────────────────
 function updateRouteSummary() {
